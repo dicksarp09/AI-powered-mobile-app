@@ -1,5 +1,6 @@
 export 'audio_capture_service.dart';
 export 'device_profile_service.dart';
+export 'local_storage_service.dart';
 export 'output_validator.dart';
 export 'slm_action_extractor.dart';
 export 'slm_model_manager.dart';
