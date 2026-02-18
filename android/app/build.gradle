@@ -57,9 +57,10 @@ android {
         }
     }
 
-    // Required for whisper_flutter native libraries
+    // Required for whisper_flutter and llama_flutter native libraries
     packagingOptions {
         pickFirst '**/libwhisper.so'
+        pickFirst '**/libllama.so'
         pickFirst '**/libc++_shared.so'
     }
 }
