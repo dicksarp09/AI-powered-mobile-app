@@ -16,6 +16,10 @@ dependencies:
   permission_handler: ^11.3.0
   path_provider: ^2.1.2
   path: ^1.9.0
+  # STT dependencies - whisper.cpp bindings
+  whisper_flutter: ^1.0.0
+  # Alternative: ONNX Runtime for Distil-Whisper
+  # onnxruntime: ^1.3.1
 
 dev_dependencies:
   flutter_test:
