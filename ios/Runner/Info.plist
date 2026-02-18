@@ -47,5 +47,13 @@
 	<!-- Microphone permission for audio recording -->
 	<key>NSMicrophoneUsageDescription</key>
 	<string>This app needs microphone access to record audio for AI processing</string>
+	
+	<!-- Calendar permission for adding tasks -->
+	<key>NSCalendarsUsageDescription</key>
+	<string>This app needs calendar access to add tasks from your voice notes</string>
+	
+	<!-- Notification permission for reminders -->
+	<key>NSUserNotificationUsageDescription</key>
+	<string>This app needs notification access to remind you about upcoming tasks</string>
 </dict>
 </plist>
