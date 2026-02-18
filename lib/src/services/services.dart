@@ -4,3 +4,4 @@ export 'slm_action_extractor.dart';
 export 'slm_model_manager.dart';
 export 'speech_to_text_service.dart';
 export 'stt_model_manager.dart';
+export 'transcript_cleaner.dart';
