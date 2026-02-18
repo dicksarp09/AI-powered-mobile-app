@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:io';
 import 'package:logging/logging.dart';
+import '../stt_backends/stt_backends.dart';
 
 /// Exception thrown when STT model fails to load
 class STTModelLoadException implements Exception {
@@ -20,40 +21,9 @@ class STTTranscriptionException implements Exception {
   String toString() => 'STTTranscriptionException: $message ${audioPath != null ? '(audio: $audioPath)' : ''}';
 }
 
-/// Represents a loaded STT model instance
-/// 
-/// This is an internal class that manages the model lifecycle.
-/// The actual implementation depends on the STT backend being used
-/// (whisper.cpp, ONNX Runtime, etc.)
-class _STTModel {
-  final String modelPath;
-  final DateTime loadedAt;
-  bool _isDisposed = false;
-  
-  // Internal model reference - actual type depends on backend
-  // For whisper.cpp: WhisperContext
-  // For ONNX: OrtSession
-  dynamic _nativeModel;
-
-  _STTModel(this.modelPath, this._nativeModel) : loadedAt = DateTime.now();
-
-  bool get isDisposed => _isDisposed;
-  dynamic get nativeModel => _nativeModel;
-
-  Future<void> dispose() async {
-    if (_isDisposed) return;
-    _isDisposed = true;
-    
-    // Backend-specific cleanup
-    // For whisper.cpp: whisper_free(context)
-    // For ONNX: session.release()
-    _nativeModel = null;
-  }
-}
-
 /// Service responsible for converting audio to text using offline STT models.
 ///
-/// This service follows strict lifecycle management:
+/// This service uses a real STT backend (Whisper) and follows strict lifecycle management:
 /// - Models are loaded ONLY when transcription is needed
 /// - Models are unloaded IMMEDIATELY after transcription completes
 /// - No model is kept resident in memory between calls
@@ -67,7 +37,7 @@ class _STTModel {
 /// final stt = SpeechToTextService();
 /// final transcript = await stt.transcribeBatch(
 ///   audioFilePath: '/path/to/audio.wav',
-///   modelPath: '/path/to/model.bin',
+///   modelPath: '/path/to/ggml-model.bin',
 /// );
 /// ```
 ///
@@ -76,14 +46,16 @@ class _STTModel {
 /// final stt = SpeechToTextService();
 /// final transcriptStream = stt.transcribeLive(
 ///   audioStream: audioCaptureStream,
-///   modelPath: '/path/to/model.bin',
+///   modelPath: '/path/to/ggml-model.bin',
 /// );
 /// transcriptStream.listen((partial) => print(partial));
 /// ```
 class SpeechToTextService {
   static final Logger _logger = Logger('SpeechToTextService');
   
-  _STTModel? _currentModel;
+  // STT Backend instance - uses Whisper
+  STTBackend? _backend;
+  
   bool _isTranscribing = false;
   final _transcriptionController = StreamController<String>.broadcast();
   StreamSubscription<List<int>>? _audioSubscription;
@@ -93,7 +65,13 @@ class SpeechToTextService {
 
   /// Constructor
   SpeechToTextService() {
-    _logger.info('SpeechToTextService initialized');
+    _logger.info('SpeechToTextService initialized with Whisper backend');
+  }
+
+  /// Creates and returns the STT backend instance
+  /// Override this for dependency injection in tests
+  STTBackend _createBackend() {
+    return WhisperSTTBackend();
   }
 
   /// Transcribes an audio file using the specified model.
@@ -108,7 +86,7 @@ class SpeechToTextService {
   ///
   /// Parameters:
   /// - [audioFilePath]: Path to the 16kHz mono WAV audio file
-  /// - [modelPath]: Path to the STT model file (e.g., .bin for whisper.cpp)
+  /// - [modelPath]: Path to the STT model file (ggml format for Whisper)
   ///
   /// Returns the transcribed text.
   ///
@@ -133,7 +111,7 @@ class SpeechToTextService {
 
     // Prevent concurrent transcriptions
     if (_isTranscribing) {
-      _logger.warning('Transcription already in progress, waiting...');
+      _logger.warning('Transcription already in progress');
       throw STTTranscriptionException('Another transcription is in progress');
     }
 
@@ -141,20 +119,29 @@ class SpeechToTextService {
     final stopwatch = Stopwatch()..start();
 
     try {
+      // Create backend
+      _backend = _createBackend();
+      
       // Load model
       _logger.info('Loading STT model...');
-      await _loadModel(modelPath);
+      await _backend!.loadModel(modelPath);
       _logger.info('Model loaded successfully in ${stopwatch.elapsedMilliseconds}ms');
 
       // Perform transcription
       _logger.info('Starting transcription...');
-      final transcript = await _performBatchTranscription(audioFilePath);
+      final result = await _backend!.transcribeFile(audioFilePath);
       
       stopwatch.stop();
       _logger.info('Transcription completed in ${stopwatch.elapsedMilliseconds}ms');
-      _logger.info('Transcript length: ${transcript.length} characters');
+      _logger.info('Transcript length: ${result.text.length} characters');
+      
+      if (result.language != null) {
+        _logger.info('Detected language: ${result.language}');
+      }
 
-      return transcript;
+      return result.text;
+    } on FileSystemException {
+      rethrow;
     } catch (e, stackTrace) {
       _logger.severe('Transcription failed: $e', e, stackTrace);
       throw STTTranscriptionException(
@@ -162,7 +149,7 @@ class SpeechToTextService {
         audioPath: audioFilePath,
       );
     } finally {
-      // ALWAYS unload model, even on error
+      // ALWAYS unload model and dispose backend, even on error
       _logger.info('Unloading STT model...');
       await _unloadModel();
       _isTranscribing = false;
@@ -182,7 +169,7 @@ class SpeechToTextService {
   ///
   /// Parameters:
   /// - [audioStream]: Stream of audio data chunks (PCM 16-bit recommended)
-  /// - [modelPath]: Path to the STT model file
+  /// - [modelPath]: Path to the STT model file (ggml format)
   ///
   /// Returns a stream of partial transcript strings.
   ///
@@ -203,9 +190,12 @@ class SpeechToTextService {
 
     controller.onListen = () async {
       try {
+        // Create backend
+        _backend = _createBackend();
+        
         // Load model once for the entire stream
         _logger.info('Loading STT model for live transcription...');
-        await _loadModel(modelPath);
+        await _backend!.loadModel(modelPath);
         isModelLoaded = true;
         _logger.info('Model loaded for live transcription');
 
@@ -214,8 +204,9 @@ class SpeechToTextService {
           (audioChunk) async {
             try {
               // Process audio chunk and get partial transcript
-              final partial = await _processAudioChunk(audioChunk);
+              final partial = await _backend!.processAudioChunk(audioChunk);
               if (partial.isNotEmpty) {
+                accumulatedTranscript.write(' ');
                 accumulatedTranscript.write(partial);
                 controller.add(partial);
                 _logger.fine('Live partial: $partial');
@@ -230,6 +221,17 @@ class SpeechToTextService {
           },
           onDone: () async {
             _logger.info('Audio stream closed, finalizing live transcription');
+            
+            // Finalize with any remaining audio
+            if (_backend is WhisperSTTBackend) {
+              final finalPartial = await (_backend as WhisperSTTBackend).finalizeLiveTranscription();
+              if (finalPartial.isNotEmpty) {
+                accumulatedTranscript.write(' ');
+                accumulatedTranscript.write(finalPartial);
+                controller.add(finalPartial);
+              }
+            }
+            
             final finalTranscript = accumulatedTranscript.toString();
             _logger.info('Final transcript length: ${finalTranscript.length} characters');
             
@@ -271,106 +273,22 @@ class SpeechToTextService {
     return controller.stream;
   }
 
-  /// Loads the STT model from the specified path.
-  /// 
-  /// This is an internal method that handles the actual model loading
-  /// based on the STT backend being used.
-  Future<void> _loadModel(String modelPath) async {
-    // Check if model file exists
-    final modelFile = File(modelPath);
-    if (!await modelFile.exists()) {
-      throw STTModelLoadException(modelPath, 'Model file not found');
-    }
-
-    // Ensure any previous model is unloaded
-    if (_currentModel != null) {
-      _logger.warning('Previous model still loaded, unloading first');
-      await _unloadModel();
-    }
-
-    try {
-      // Backend-specific model loading
-      // TODO: Replace with actual implementation based on your STT backend
-      
-      // Example for whisper.cpp:
-      // final context = await WhisperContext.createContext(modelPath: modelPath);
-      // _currentModel = _STTModel(modelPath, context);
-      
-      // Example for ONNX Runtime:
-      // final session = OrtSession.fromFile(modelFile);
-      // _currentModel = _STTModel(modelPath, session);
-      
-      // Placeholder implementation
-      _logger.info('Loading model from: $modelPath');
-      await Future.delayed(const Duration(milliseconds: 100)); // Simulate loading
-      _currentModel = _STTModel(modelPath, null);
-      
-      _logger.info('Model loaded successfully: $modelPath');
-    } catch (e) {
-      throw STTModelLoadException(modelPath, 'Failed to load: $e');
-    }
-  }
-
-  /// Unloads the currently loaded STT model.
+  /// Unloads the currently loaded STT model and disposes backend
   Future<void> _unloadModel() async {
-    if (_currentModel == null) {
+    if (_backend == null) {
       _logger.fine('No model to unload');
       return;
     }
 
     try {
-      final modelPath = _currentModel!.modelPath;
-      await _currentModel!.dispose();
-      _currentModel = null;
-      _logger.info('Model unloaded: $modelPath');
+      await _backend!.unloadModel();
+      await _backend!.dispose();
+      _backend = null;
+      _logger.info('Model and backend unloaded');
     } catch (e) {
       _logger.warning('Error unloading model: $e');
-      _currentModel = null; // Force clear even on error
+      _backend = null; // Force clear even on error
     }
-  }
-
-  /// Performs batch transcription on an audio file.
-  /// 
-  /// This is the internal implementation that uses the loaded model.
-  Future<String> _performBatchTranscription(String audioFilePath) async {
-    if (_currentModel == null || _currentModel!.isDisposed) {
-      throw STTTranscriptionException('Model not loaded');
-    }
-
-    // Backend-specific transcription
-    // TODO: Replace with actual implementation based on your STT backend
-    
-    // Example for whisper.cpp:
-    // final result = await _currentModel!.nativeModel.transcribe(
-    //   audioPath: audioFilePath,
-    //   language: 'en',
-    // );
-    // return result.text;
-    
-    // Placeholder implementation
-    _logger.info('Transcribing audio file: $audioFilePath');
-    await Future.delayed(const Duration(seconds: 1)); // Simulate transcription
-    
-    // Return a placeholder transcript
-    // In real implementation, this would be the actual transcription result
-    return 'This is a placeholder transcript. Replace with actual STT backend integration.';
-  }
-
-  /// Processes a single audio chunk for live transcription.
-  /// 
-  /// Returns partial transcript text for this chunk.
-  Future<String> _processAudioChunk(List<int> audioChunk) async {
-    if (_currentModel == null || _currentModel!.isDisposed) {
-      return '';
-    }
-
-    // Backend-specific chunk processing
-    // TODO: Replace with actual implementation
-    
-    // Accumulate chunks and process when enough data is available
-    // Return partial transcript
-    
-    return ''; // Placeholder
   }
 
   /// Disposes the service and releases all resources.
