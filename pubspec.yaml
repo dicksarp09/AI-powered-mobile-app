@@ -12,6 +12,10 @@ dependencies:
   flutter:
     sdk: flutter
   logging: ^1.2.0
+  record: ^5.0.4
+  permission_handler: ^11.3.0
+  path_provider: ^2.1.2
+  path: ^1.9.0
 
 dev_dependencies:
   flutter_test:
