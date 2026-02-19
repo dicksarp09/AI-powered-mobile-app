@@ -1,6 +1,8 @@
 export 'audio_capture_service.dart';
+export 'background_task_manager.dart';
 export 'device_action_service.dart';
 export 'device_profile_service.dart';
+export 'inference_scheduler.dart';
 export 'local_storage_service.dart';
 export 'output_validator.dart';
 export 'slm_action_extractor.dart';
