@@ -1,0 +1,43 @@
+# Test Configuration for AI-Powered Mobile App
+
+analyzer:
+  exclude:
+    - "**/*.g.dart"
+    - "**/*.freezed.dart"
+    - "lib/generated/**"
+  strong-mode:
+    implicit-casts: false
+    implicit-dynamic: false
+
+test_coverage:
+  exclude:
+    - "lib/main.dart"
+    - "lib/**/*.g.dart"
+    - "test/**"
+    - "integration_test/**"
+  include:
+    - "lib/src/services/*.dart"
+    - "lib/src/models/*.dart"
+    - "lib/src/slm_backends/*.dart"
+    - "lib/src/stt_backends/*.dart"
+
+# Test groups configuration
+test_groups:
+  unit:
+    - test/models/**
+    - test/services/**
+    - test/slm_backends/**
+    - test/stt_backends/**
+  
+  integration:
+    - integration_test/**
+  
+  performance:
+    - test/performance/**
+
+# Performance thresholds
+performance_thresholds:
+  transcript_cleaning_ms: 5
+  stt_processing_30s_s: 10
+  slm_extraction_s: 5
+  storage_operation_ms: 100
