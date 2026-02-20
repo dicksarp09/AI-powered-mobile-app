@@ -110,11 +110,15 @@ class RealAIService {
   Future<Map<String, dynamic>> extractTasks(String transcript) async {
     _logger.info('Extracting tasks with Gemini API...');
     
+    // Updated model name - gemini-1.5-flash is faster and cheaper
+    final modelName = 'gemini-1.5-flash';
     final url = Uri.https(
       _geminiBaseUrl,
-      '/v1beta/models/gemini-pro:generateContent',
+      '/v1beta/models/$modelName:generateContent',
       {'key': _apiKey},
     );
+    
+    _logger.fine('API URL: $url');
     
     // Build prompt
     final prompt = _buildPrompt(transcript);
@@ -161,12 +165,18 @@ class RealAIService {
         result['processing_time_ms'] = stopwatch.elapsedMilliseconds;
         
         return result;
+      } else if (response.statusCode == 400) {
+        _logger.severe('Bad request: $responseBody');
+        throw Exception('Invalid API key or request format. Check your GOOGLE_API_KEY.');
+      } else if (response.statusCode == 404) {
+        _logger.severe('Model not found: $responseBody');
+        throw Exception('Model not found. API endpoint may have changed. Response: $responseBody');
       } else if (response.statusCode == 429) {
         _logger.severe('Rate limit exceeded');
         throw Exception('Rate limit exceeded. Please wait and try again.');
       } else {
-        _logger.severe('Gemini API error: ${response.statusCode}');
-        throw Exception('Gemini API error: ${response.statusCode}');
+        _logger.severe('Gemini API error: ${response.statusCode} - $responseBody');
+        throw Exception('Gemini API error: ${response.statusCode}. Response: $responseBody');
       }
     } catch (e) {
       _logger.severe('Task extraction failed: $e');
