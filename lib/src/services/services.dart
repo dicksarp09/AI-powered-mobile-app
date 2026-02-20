@@ -5,6 +5,7 @@ export 'device_profile_service.dart';
 export 'inference_scheduler.dart';
 export 'local_storage_service.dart';
 export 'output_validator.dart';
+export 'real_ai_service.dart';
 export 'slm_action_extractor.dart';
 export 'slm_model_manager.dart';
 export 'speech_to_text_service.dart';
