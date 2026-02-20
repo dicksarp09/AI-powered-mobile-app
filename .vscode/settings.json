@@ -1,0 +1,9 @@
+{
+  "dart.flutterSdkPath": "C:\\Users\\USER\\.vscode\\flutter",
+  "dart.sdkPath": "C:\\Users\\USER\\.vscode\\flutter\\bin\\cache\\dart-sdk",
+  "dart.enableSdkFormatter": true,
+  "[dart]": {
+    "editor.defaultFormatter": "Dart-Code.dart-code",
+    "editor.formatOnSave": true
+  }
+}
