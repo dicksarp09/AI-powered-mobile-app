@@ -110,8 +110,9 @@ class RealAIService {
   Future<Map<String, dynamic>> extractTasks(String transcript) async {
     _logger.info('Extracting tasks with Gemini API...');
     
-    // Updated model name - gemini-1.5-flash is faster and cheaper
-    final modelName = 'gemini-1.5-flash';
+    // Updated model name - API now uses Gemini 2.x models
+    // Use 'gemini-2.0-flash' (fast, cheap) or 'gemini-2.5-flash' (latest)
+    final modelName = 'gemini-2.0-flash';
     final url = Uri.https(
       _geminiBaseUrl,
       '/v1beta/models/$modelName:generateContent',

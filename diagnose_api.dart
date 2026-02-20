@@ -99,8 +99,12 @@ void main() async {
       print('   Response: $responseBody');
       
       if (response.statusCode == 404) {
-        print('\n   💡 Model "gemini-1.5-flash" not found.');
-        print('   Try using "gemini-pro" or "gemini-1.0-pro" instead');
+        print('\n   💡 Model not found.');
+        print('   The API has been updated. Try using one of these:');
+        print('     • gemini-2.0-flash  (recommended)');
+        print('     • gemini-2.0-pro');
+        print('     • gemini-2.5-flash');
+        print('\n   Update lib/src/services/real_ai_service.dart line 114');
       }
     }
     
