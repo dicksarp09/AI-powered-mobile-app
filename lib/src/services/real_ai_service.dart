@@ -43,11 +43,28 @@ class RealAIService {
   }
   
   /// Load API key from .env file
+  /// Searches in multiple locations: current dir, project root, script dir
   String _loadApiKeyFromEnv() {
     try {
-      final envFile = File('.env');
-      if (!envFile.existsSync()) {
-        _logger.warning('.env file not found');
+      // Try multiple locations for .env file
+      final possiblePaths = [
+        '.env',  // Current directory
+        '../../.env',  // Project root (from lib/src/services)
+        '../../../.env',  // One more level up
+      ];
+      
+      File? envFile;
+      for (final path in possiblePaths) {
+        final file = File(path);
+        if (file.existsSync()) {
+          envFile = file;
+          _logger.fine('Found .env at: $path');
+          break;
+        }
+      }
+      
+      if (envFile == null) {
+        _logger.warning('.env file not found. Searched in: ${possiblePaths.join(', ')}');
         return '';
       }
       
@@ -215,16 +232,39 @@ void main(List<String> args) async {
   print('🤖 Real AI Service Test');
   print('======================\n');
   
+  // Check current directory
+  print('Current directory: ${Directory.current.path}\n');
+  
+  // Check if .env exists
+  final envPaths = ['.env', '../../.env', '../../../.env'];
+  bool envFound = false;
+  
+  for (final path in envPaths) {
+    if (File(path).existsSync()) {
+      print('✅ Found .env file at: $path');
+      envFound = true;
+      break;
+    }
+  }
+  
+  if (!envFound) {
+    print('❌ .env file not found!');
+    print('\nPlease create a .env file in your project root with:');
+    print('  GOOGLE_API_KEY=your_api_key_here');
+    print('\nGet your API key from: https://makersuite.google.com/app/apikey');
+    return;
+  }
+  
   try {
     final service = RealAIService();
     await service.initialize();
     
-    print('Testing task extraction...\n');
+    print('\nTesting task extraction...\n');
     final result = await service.extractTasks(
       'Remind me to call John tomorrow at 3pm about the project'
     );
     
-    print('✅ Result:');
+    print('\n✅ Result:');
     print(const JsonEncoder.withIndent('  ').convert(result));
     
     service.dispose();
