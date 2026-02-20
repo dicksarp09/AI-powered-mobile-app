@@ -1,0 +1,42 @@
+# Environment variables
+.env
+
+# Flutter/Dart
+.dart_tool/
+.packages
+build/
+flutter_*.png
+linked_*.ds
+unlinked.ds
+unlinked_spec.ds
+
+# IDE
+.idea/
+.vscode/
+*.iml
+*.ipr
+*.iws
+
+# iOS
+ios/Pods/
+ios/.symlinks/
+ios/Flutter/Flutter.framework
+ios/Flutter/Flutter.podspec
+
+# Android
+android/.gradle/
+android/app/debug/
+android/app/profile/
+android/app/release/
+*.apk
+*.aab
+
+# Testing
+coverage/
+.test_coverage.dart
+
+# Temporary files
+*.log
+*.tmp
+*.temp
+.DS_Store

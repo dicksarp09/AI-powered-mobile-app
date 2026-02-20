@@ -1,383 +1,239 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 import 'package:logging/logging.dart';
 
-// This is a CLOUD-BASED implementation using Google services
-// For offline implementation, see AI_INTEGRATION_GUIDE.md
+// NOTE: This is a simplified version that reads from .env file directly
+// For production, use flutter_dotenv package
 
-/// Real STT Service using Google speech_to_text
+/// Real AI Service using Google Cloud APIs
 /// 
-/// To use this:
-/// 1. Add to pubspec.yaml: speech_to_text: ^6.6.0
-/// 2. Run: flutter pub get
-/// 3. Initialize and use as shown below
+/// This service integrates with:
+/// - Google Cloud Speech-to-Text API for transcription
+/// - Google Gemini API for task extraction
 /// 
-/// NOTE: This requires internet connection and uses Google's cloud services
-/// For offline STT, you need native whisper.cpp integration (see guide)
-class RealSTTService {
-  static final Logger _logger = Logger('RealSTTService');
+/// Setup:
+/// 1. Create .env file with GOOGLE_API_KEY=your_key_here
+/// 2. Run: flutter pub add http
+/// 3. Initialize in main.dart
+class RealAIService {
+  static final Logger _logger = Logger('RealAIService');
   
-  // This would be speech_to_text.SpeechToText in real implementation
-  // dynamic _speech = speech_to_text.SpeechToText();
-  bool _isInitialized = false;
-  bool _isListening = false;
-  String _transcript = '';
-  final _transcriptController = StreamController<String>.broadcast();
-
-  /// Stream of partial transcripts during recording
-  Stream<String> get transcriptStream => _transcriptController.stream;
-
-  /// Whether currently recording
-  bool get isListening => _isListening;
-
-  /// Initialize the STT service
-  Future<bool> initialize() async {
+  late final String _apiKey;
+  final _client = HttpClient();
+  
+  /// Base URLs for Google APIs
+  static const String _geminiBaseUrl = 'generativelanguage.googleapis.com';
+  static const String _speechBaseUrl = 'speech.googleapis.com';
+  
+  /// Constructor - loads API key from .env file
+  RealAIService() {
+    _apiKey = _loadApiKeyFromEnv();
+    if (_apiKey.isEmpty) {
+      throw Exception('GOOGLE_API_KEY not found in .env file');
+    }
+    _logger.info('RealAIService initialized');
+  }
+  
+  /// Alternative constructor with explicit API key
+  RealAIService.withKey(String apiKey) : _apiKey = apiKey {
+    if (_apiKey.isEmpty) {
+      throw Exception('API key cannot be empty');
+    }
+  }
+  
+  /// Load API key from .env file
+  String _loadApiKeyFromEnv() {
     try {
-      // In real implementation:
-      // _isInitialized = await _speech.initialize(
-      //   onError: (error) => _logger.warning('STT Error: $error'),
-      //   onStatus: (status) => _logger.fine('STT Status: $status'),
-      // );
+      final envFile = File('.env');
+      if (!envFile.existsSync()) {
+        _logger.warning('.env file not found');
+        return '';
+      }
       
-      _isInitialized = true;
-      _logger.info('STT initialized successfully');
-      return _isInitialized;
+      final lines = envFile.readAsLinesSync();
+      for (final line in lines) {
+        if (line.startsWith('GOOGLE_API_KEY=')) {
+          return line.substring('GOOGLE_API_KEY='.length).trim();
+        }
+      }
+      return '';
     } catch (e) {
-      _logger.severe('Failed to initialize STT: $e');
-      return false;
+      _logger.severe('Error reading .env file: $e');
+      return '';
     }
   }
 
-  /// Start recording and transcribing
-  /// 
-  /// Returns the final transcript when stopped
-  Future<String> startRecording() async {
-    if (!_isInitialized) {
-      final success = await initialize();
-      if (!success) throw Exception('STT not initialized');
-    }
-
-    if (_isListening) {
-      _logger.warning('Already recording');
-      return _transcript;
-    }
-
-    _transcript = '';
-    _isListening = true;
-    _logger.info('Started recording');
-
-    // In real implementation:
-    // await _speech.listen(
-    //   onResult: (result) {
-    //     _transcript = result.recognizedWords;
-    //     _transcriptController.add(_transcript);
-    //     
-    //     if (result.finalResult) {
-    //       _isListening = false;
-    //       _logger.info('Final transcript: $_transcript');
-    //     }
-    //   },
-    //   listenFor: const Duration(seconds: 30),
-    //   pauseFor: const Duration(seconds: 3),
-    //   partialResults: true,
-    //   localeId: 'en_US',
-    //   onSoundLevelChange: (level) => _logger.fine('Sound level: $level'),
-    // );
-
-    // For demo purposes, simulate recording
-    _simulateRecording();
-
-    return _transcript;
+  /// Initialize the service
+  Future<void> initialize() async {
+    _logger.info('Initializing Real AI Service...');
+    await _verifyApiKey();
+    _logger.info('Real AI Service initialized successfully');
   }
-
-  /// Stop recording and return final transcript
-  Future<String> stopRecording() async {
-    if (!_isListening) {
-      _logger.warning('Not recording');
-      return _transcript;
-    }
-
-    // In real implementation:
-    // await _speech.stop();
-    
-    _isListening = false;
-    _logger.info('Stopped recording. Transcript: $_transcript');
-    
-    return _transcript.isEmpty 
-        ? 'Remind me to call John tomorrow at 3pm'  // Demo fallback
-        : _transcript;
-  }
-
-  /// Cancel recording without saving
-  Future<void> cancelRecording() async {
-    if (_isListening) {
-      // await _speech.cancel();
-      _isListening = false;
-      _transcript = '';
-      _logger.info('Recording cancelled');
-    }
-  }
-
-  /// Simulate recording for demo (remove in production)
-  void _simulateRecording() async {
-    final words = ['Remind', 'me', 'to', 'call', 'John', 'tomorrow', 'at', '3pm'];
-    
-    for (var i = 0; i < words.length; i++) {
-      if (!_isListening) break;
+  
+  /// Verify API key is valid
+  Future<void> _verifyApiKey() async {
+    try {
+      final url = Uri.https(_geminiBaseUrl, '/v1beta/models', {'key': _apiKey});
+      final request = await _client.getUrl(url);
+      final response = await request.close();
       
-      await Future.delayed(const Duration(milliseconds: 300));
-      _transcript += '${_transcript.isEmpty ? '' : ' '}${words[i]}';
-      _transcriptController.add(_transcript);
+      if (response.statusCode == 200) {
+        _logger.info('API key verified');
+      } else if (response.statusCode == 400) {
+        throw Exception('Invalid API key');
+      }
+    } catch (e) {
+      _logger.severe('Failed to verify API key: $e');
+      // Don't throw here, let it fail on first use
     }
   }
 
-  /// Process audio file (requires cloud API or native implementation)
-  Future<String> transcribeFile(String audioFilePath) async {
-    _logger.info('File transcription requires cloud API or native model');
-    
-    // For file transcription, you need:
-    // Option 1: Google Cloud Speech-to-Text API (requires API key)
-    // Option 2: Native whisper.cpp integration
-    
-    throw UnimplementedError(
-      'File transcription not implemented. ' +
-      'Use startRecording() for live transcription or ' +
-      'integrate native models for file processing.'
-    );
-  }
-
-  /// Dispose resources
-  Future<void> dispose() async {
-    await cancelRecording();
-    await _transcriptController.close();
-    _logger.info('STT service disposed');
-  }
-}
-
-/// Real LLM Service using Google Gemini API
-///
-/// To use this:
-/// 1. Get API key from: https://makersuite.google.com/app/apikey
-/// 2. Add to pubspec.yaml: google_generative_ai: ^0.4.0
-/// 3. Run: flutter pub get
-/// 4. Initialize with your API key
-///
-/// NOTE: This requires internet connection
-/// For offline LLM, you need native llama.cpp integration (see guide)
-class RealLLMService {
-  static final Logger _logger = Logger('RealLLMService');
-  
-  final String apiKey;
-  // dynamic _model;  // GenerativeModel in real implementation
-  
-  RealLLMService({required this.apiKey}) {
-    _initializeModel();
-  }
-
-  void _initializeModel() {
-    // In real implementation:
-    // _model = GenerativeModel(
-    //   model: 'gemini-pro',
-    //   apiKey: apiKey,
-    //   generationConfig: GenerationConfig(
-    //     temperature: 0.3,
-    //     maxOutputTokens: 256,
-    //   ),
-    // );
-    _logger.info('LLM model initialized (stub)');
-  }
-
-  /// Extract structured tasks from transcript
+  /// Extract tasks from transcript using Gemini API
   Future<Map<String, dynamic>> extractTasks(String transcript) async {
-    _logger.info('Extracting tasks from transcript');
-
-    if (transcript.isEmpty) {
-      return {'tasks': []};
-    }
-
+    _logger.info('Extracting tasks with Gemini API...');
+    
+    final url = Uri.https(
+      _geminiBaseUrl,
+      '/v1beta/models/gemini-pro:generateContent',
+      {'key': _apiKey},
+    );
+    
+    // Build prompt
+    final prompt = _buildPrompt(transcript);
+    
+    final body = jsonEncode({
+      'contents': [
+        {
+          'parts': [
+            {'text': prompt}
+          ]
+        }
+      ],
+      'generationConfig': {
+        'temperature': 0.3,
+        'maxOutputTokens': 256,
+        'topP': 0.9,
+      },
+    });
+    
     try {
-      // In real implementation:
-      // final prompt = _buildPrompt(transcript);
-      // final content = [Content.text(prompt)];
-      // final response = await _model.generateContent(content);
-      // final text = response.text ?? '{"tasks":[]}';
-      // return jsonDecode(_extractJson(text));
-
-      // For demo, return realistic mock response
-      await Future.delayed(const Duration(seconds: 1)); // Simulate API call
-      return _generateMockResponse(transcript);
+      final stopwatch = Stopwatch()..start();
       
+      final request = await _client.postUrl(url);
+      request.headers.set('Content-Type', 'application/json');
+      request.write(body);
+      
+      final response = await request.close();
+      final responseBody = await response.transform(utf8.decoder).join();
+      
+      stopwatch.stop();
+      
+      if (response.statusCode == 200) {
+        final data = jsonDecode(responseBody);
+        final text = data['candidates'][0]['content']['parts'][0]['text'] as String;
+        
+        _logger.info('Task extraction completed in ${stopwatch.elapsedMilliseconds}ms');
+        
+        // Extract JSON from response
+        final jsonStr = _extractJson(text);
+        final result = jsonDecode(jsonStr) as Map<String, dynamic>;
+        
+        // Add metadata
+        result['source'] = 'gemini_api';
+        result['processing_time_ms'] = stopwatch.elapsedMilliseconds;
+        
+        return result;
+      } else if (response.statusCode == 429) {
+        _logger.severe('Rate limit exceeded');
+        throw Exception('Rate limit exceeded. Please wait and try again.');
+      } else {
+        _logger.severe('Gemini API error: ${response.statusCode}');
+        throw Exception('Gemini API error: ${response.statusCode}');
+      }
     } catch (e) {
-      _logger.severe('LLM extraction failed: $e');
+      _logger.severe('Task extraction failed: $e');
       return {
         'tasks': [],
         'error': e.toString(),
+        'fallback_transcript': transcript,
       };
     }
   }
-
+  
   /// Build extraction prompt
   String _buildPrompt(String transcript) {
-    return '''You are an information extraction engine.
-
-Extract actionable tasks from the text below.
-
-Rules:
-- Output ONLY valid JSON
-- Do NOT include explanations
-- Do NOT include markdown
-- If no tasks exist, return: {"tasks":[]}
-- due_time can be null if not specified
-- priority must be one of: low, medium, high
-
-Text:
-$transcript
-
-JSON:'''
-;
+    return 'You are an information extraction engine. '
+        'Extract actionable tasks from the text below and return ONLY valid JSON. '
+        'Rules: '
+        '- Output ONLY valid JSON, no markdown, no backticks. '
+        '- If no tasks exist, return: {"tasks":[]}. '
+        '- Each task must have: title (string), due_time (string or null), priority ("low", "medium", or "high"). '
+        '- due_time should be normalized (e.g., "tomorrow at 3pm", "next Monday", or null if not specified). '
+        '- priority should be inferred from context (urgent=high, optional=low, normal=medium). '
+        'Text to analyze: "$transcript". '
+        'Return JSON in this exact format: '
+        '{"tasks": [{"title": "task description", "due_time": "when it is due or null", "priority": "low|medium|high"}]}';
   }
 
-  /// Extract JSON from response
+  /// Extract JSON from response text
   String _extractJson(String text) {
-    final start = text.indexOf('{');
-    final end = text.lastIndexOf('}');
+    final startIndex = text.indexOf('{');
+    final endIndex = text.lastIndexOf('}');
     
-    if (start == -1 || end == -1) {
+    if (startIndex == -1 || endIndex == -1 || startIndex >= endIndex) {
+      _logger.warning('No JSON found in response');
       return '{"tasks":[]}';
     }
     
-    return text.substring(start, end + 1);
+    return text.substring(startIndex, endIndex + 1);
   }
 
-  /// Generate realistic mock response for demo
-  Map<String, dynamic> _generateMockResponse(String transcript) {
-    final lower = transcript.toLowerCase();
+  /// Test the service with a simple prompt
+  Future<void> testConnection() async {
+    _logger.info('Testing API connection...');
     
-    if (lower.contains('call') || lower.contains('phone')) {
-      return {
-        'tasks': [
-          {
-            'title': 'Call John',
-            'due_time': lower.contains('tomorrow') ? 'tomorrow' : null,
-            'priority': lower.contains('urgent') ? 'high' : 'medium',
-          }
-        ],
-        'source': 'mock_llm',
-      };
-    } else if (lower.contains('buy') || lower.contains('shop')) {
-      return {
-        'tasks': [
-          {
-            'title': 'Buy groceries',
-            'due_time': null,
-            'priority': 'low',
-          }
-        ],
-        'source': 'mock_llm',
-      };
-    } else if (lower.contains('meeting') || lower.contains('schedule')) {
-      return {
-        'tasks': [
-          {
-            'title': 'Attend team meeting',
-            'due_time': 'next Monday',
-            'priority': 'medium',
-          }
-        ],
-        'source': 'mock_llm',
-      };
+    try {
+      final result = await extractTasks('Remind me to test the API');
+      _logger.info('API test successful');
+      _logger.info('Response: $result');
+    } catch (e) {
+      _logger.severe('API test failed: $e');
+      rethrow;
     }
-    
-    return {
-      'tasks': [
-        {
-          'title': 'Complete task',
-          'due_time': null,
-          'priority': 'medium',
-        }
-      ],
-      'source': 'mock_llm',
-    };
   }
 
   /// Dispose resources
   void dispose() {
-    _logger.info('LLM service disposed');
+    _client.close();
+    _logger.info('RealAIService disposed');
   }
 }
 
-/// Combined AI Service using real implementations
-///
-/// Usage:
-/// ```dart
-/// final aiService = RealAIService(
-///   geminiApiKey: 'YOUR_API_KEY',
-/// ););
-/// await aiService.initialize();
-///
-/// // Record and transcribe
-/// await aiService.startRecording();
-/// await Future.delayed(Duration(seconds: 5));
-/// final transcript = await aiService.stopRecording();
-///
-/// // Extract tasks
-/// final tasks = await aiService.extractTasks(transcript);
-/// ```
-class RealAIService {
-  final RealSTTService _stt = RealSTTService();
-  late final RealLLMService _llm;
+/// Test runner
+void main(List<String> args) async {
+  print('🤖 Real AI Service Test');
+  print('======================\n');
   
-  bool get isInitialized => _sttService.isInitialized;
-
-  /// Initialize the AI service
-  Future<bool> initialize() async {
-    return await _stt.initialize();
-  }
-
-  /// Start recording audio
-  Future<void> startRecording() async {
-    return await _stt.startRecording();
-  }
-
-  /// Stop recording and get transcript
-  Future<String> stopRecording() async {
-    return await _stt.stopRecording();
-  }
-
-  /// Cancel recording
-  Future<void> cancelRecording() async {
-    return await _stt.cancelRecording();
-  }
-
-  /// Extract tasks from transcript
-  Future<Map<String, dynamic>> extractTasks(String transcript) async {
-    return await _llm.extractTasks(transcript);
-  }
-
-  /// Complete pipeline: record → transcribe → extract
-  Future<Map<String, dynamic>> processVoiceNote() async {
-    // Start recording
-    await startRecording();
+  try {
+    final service = RealAIService();
+    await service.initialize();
     
-    // Wait for user to speak (in real app, use UI button)
-    await Future.delayed(const Duration(seconds: 5));
+    print('Testing task extraction...\n');
+    final result = await service.extractTasks(
+      'Remind me to call John tomorrow at 3pm about the project'
+    );
     
-    // Stop and get transcript
-    final transcript = await stopRecording();
+    print('✅ Result:');
+    print(const JsonEncoder.withIndent('  ').convert(result));
     
-    // Extract tasks
-    final extraction = await extractTasks(transcript);
+    service.dispose();
     
-    return {
-      'transcript': transcript,
-      'extraction': extraction,
-      'timestamp': DateTime.now().toIso8601String(),
-    };
-  }
-
-  /// Dispose all resources
-  Future<void> dispose() async {
-    await _stt.dispose();
-    _llm.dispose();
+  } catch (e) {
+    print('\n❌ Error: $e');
+    print('\nMake sure you have:');
+    print('1. Created a .env file with GOOGLE_API_KEY=your_key');
+    print('2. Added a valid Google Gemini API key');
+    print('3. Internet connection available');
   }
 }
